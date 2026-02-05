@@ -4,6 +4,8 @@ import os
 import re
 from datetime import datetime, timezone
 from flask import Blueprint, current_app, jsonify, request
+from pydantic import BaseModel, ValidationError
+from sqlalchemy import text
 from sqlalchemy.orm import Session, selectinload
 
 from app.model import Contract, ClauseType, ContractClause
@@ -28,6 +30,8 @@ def _allowed_filename(name: str) -> bool:
     _, ext = os.path.splitext(name.lower())
     return ext in ALLOWED_EXTS
 
+class ClauseOverrideIn(BaseModel):
+    confirmed: bool | None
 
 @bp.post("")
 def upload_contract():
@@ -125,3 +129,111 @@ def upload_contract():
                 "sha256": contract.sha256_hex,
             },
         }), 201
+
+@bp.get("")
+def list_contracts():
+    engine = current_app.extensions["db_engine"]
+    with Session(engine) as session:
+        items = session.query(Contract).order_by(Contract.id.desc()).all()
+        return jsonify({
+            "items": [
+                {
+                    "id": c.id,
+                    "original_filename": c.original_filename,
+                    "processing_status": c.processing_status,
+                    "created_at": c.created_at.isoformat(),
+                    "processed_at": c.processed_at.isoformat() if c.processed_at else None,
+                }
+                for c in items
+            ]
+        }), 200
+
+
+@bp.get("/<int:contract_id>")
+def get_contract(contract_id: int):
+    engine = current_app.extensions["db_engine"]
+    with Session(engine) as session:
+        c = session.get(Contract, contract_id)
+        if not c:
+            return jsonify({"error": "contract_not_found"}), 404
+
+        clause_types = session.query(ClauseType).order_by(ClauseType.name).all()
+
+        rows = (
+            session.query(ContractClause)
+            .filter(ContractClause.contract_id == contract_id)
+            .all()
+        )
+        by_ct = {r.clause_type_id: r for r in rows}
+
+        matrix = []
+        for ct in clause_types:
+            r = by_ct.get(ct.id)
+            detected = bool(r.detected) if r else False
+            confirmed = r.confirmed if r else None
+            effective = confirmed if confirmed is not None else detected
+
+            matrix.append({
+                "clause_type": {"id": ct.id, "name": ct.name},
+                "detected": detected,
+                "confirmed": confirmed,
+                "effective": effective,
+            })
+
+        return jsonify({
+            "contract": {
+                "id": c.id,
+                "original_filename": c.original_filename,
+                "processing_status": c.processing_status,
+                "created_at": c.created_at.isoformat(),
+                "processed_at": c.processed_at.isoformat() if c.processed_at else None,
+                "error_message": c.error_message,
+            },
+            "matrix": matrix,
+        }), 200
+
+
+@bp.patch("/<int:contract_id>/clauses/<int:clause_type_id>")
+def set_clause_override(contract_id: int, clause_type_id: int):
+    try:
+        payload = ClauseOverrideIn.model_validate(request.get_json(force=True))
+    except ValidationError as e:
+        return jsonify({"error": "validation_error", "details": e.errors()}), 400
+
+    engine = current_app.extensions["db_engine"]
+    with Session(engine) as session:
+        c = session.get(Contract, contract_id)
+        if not c:
+            return jsonify({"error": "contract_not_found"}), 404
+
+        ct = session.get(ClauseType, clause_type_id)
+        if not ct:
+            return jsonify({"error": "clause_type_not_found"}), 404
+
+        row = (
+            session.query(ContractClause)
+            .filter(
+                ContractClause.contract_id == contract_id,
+                ContractClause.clause_type_id == clause_type_id,
+            )
+            .one_or_none()
+        )
+
+        # Should exist if detection ran, but keep it resilient.
+        if not row:
+            row = ContractClause(
+                contract_id=contract_id,
+                clause_type_id=clause_type_id,
+                detected=False,
+                confirmed=None,
+            )
+            session.add(row)
+
+        row.confirmed = payload.confirmed
+        session.commit()
+
+        return jsonify({
+            "contract_id": contract_id,
+            "clause_type_id": clause_type_id,
+            "confirmed": row.confirmed,
+        }), 200
