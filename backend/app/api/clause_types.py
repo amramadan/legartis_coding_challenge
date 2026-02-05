@@ -1,8 +1,9 @@
-from flask import Blueprint, jsonify, request, current_app
+from flask import Blueprint, jsonify, request
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
+from app.api._common import db_session, json_error
 from app.model import ClauseType, ClausePattern
 
 bp = Blueprint("clause_types", __name__)
@@ -18,9 +19,7 @@ class ClauseTypeIn(BaseModel):
 
 @bp.get("")
 def list_clause_types():
-    engine = current_app.extensions["db_engine"]
-
-    with Session(engine) as session:
+    with db_session() as session:
         items = (
             session.query(ClauseType)
             .options(selectinload(ClauseType.patterns))
@@ -44,14 +43,12 @@ def list_clause_types():
 
 @bp.post("")
 def create_clause_type():
-    engine = current_app.extensions["db_engine"]
-
     try:
         payload = ClauseTypeIn.model_validate(request.get_json(force=True))
     except ValidationError as e:
-        return jsonify({"error": "validation_error", "details": e.errors()}), 400
+        return json_error("validation_error", 400, details=e.errors())
 
-    with Session(engine) as session:
+    with db_session() as session:
         ct = ClauseType(name=payload.name.strip())
 
         for p in payload.patterns:
@@ -64,7 +61,7 @@ def create_clause_type():
             session.commit()
         except IntegrityError:
             session.rollback()
-            return jsonify({"error": "clause_type_name_exists"}), 409
+            return json_error("clause_type_name_exists", 409)
 
         return jsonify({
             "id": ct.id,
