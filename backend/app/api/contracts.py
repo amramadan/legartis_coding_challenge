@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, jsonify, request
 from pydantic import BaseModel, ValidationError
+from sqlalchemy import and_
 from sqlalchemy.orm import selectinload
 
 from app.api._common import db_session, json_error
@@ -173,25 +174,32 @@ def get_contract(contract_id: int):
         if not c:
             return json_error("contract_not_found", 404)
 
-        clause_types = session.query(ClauseType).order_by(ClauseType.name).all()
-
-        rows = (
-            session.query(ContractClause)
-            .filter(ContractClause.contract_id == contract_id)
-            .all()
+        q = (
+            session.query(
+                ClauseType.id.label("clause_type_id"),
+                ClauseType.name.label("clause_type_name"),
+                ContractClause.detected.label("detected"),
+                ContractClause.confirmed.label("confirmed"),
+            )
+            .outerjoin(
+                ContractClause,
+                and_(
+                    ContractClause.contract_id == contract_id,
+                    ContractClause.clause_type_id == ClauseType.id,
+                ),
+            )
+            .order_by(ClauseType.name)
         )
-        by_ct = {r.clause_type_id: r for r in rows}
 
         matrix = []
-        for ct in clause_types:
-            r = by_ct.get(ct.id)
-            detected = bool(r.detected) if r else False
-            confirmed = r.confirmed if r else None
+        for row in q.all():
+            detected = bool(row.detected) if row.detected is not None else False
+            confirmed = row.confirmed  # can be None
             effective = confirmed if confirmed is not None else detected
 
             matrix.append(
                 {
-                    "clause_type": {"id": ct.id, "name": ct.name},
+                    "clause_type": {"id": row.clause_type_id, "name": row.clause_type_name},
                     "detected": detected,
                     "confirmed": confirmed,
                     "effective": effective,
