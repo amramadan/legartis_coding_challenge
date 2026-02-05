@@ -1,16 +1,28 @@
 from __future__ import annotations
 
 import os
+import re
+from datetime import datetime, timezone
 from flask import Blueprint, current_app, jsonify, request
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.model import Contract
+from app.model import Contract, ClauseType, ContractClause
 from app.storage_local import LocalFileStorage
 
 bp = Blueprint("contracts", __name__)
 
 ALLOWED_EXTS = {".txt", ".md", ".markdown"}
 
+def _detect_clause(text: str, patterns) -> bool:
+    hay_lower = text.lower()
+    for p in patterns:
+        if p.is_regex:
+            if re.search(p.pattern, text, flags=re.IGNORECASE):
+                return True
+        else:
+            if p.pattern.lower() in hay_lower:
+                return True
+    return False
 
 def _allowed_filename(name: str) -> bool:
     _, ext = os.path.splitext(name.lower())
@@ -48,6 +60,7 @@ def upload_contract():
     stored = storage.save(f.stream, original_filename=original_filename, first_chunk=head)
 
     engine = current_app.extensions["db_engine"]
+
     with Session(engine) as session:
         contract = Contract(
             original_filename=original_filename,
@@ -55,10 +68,51 @@ def upload_contract():
             storage_key=stored.key,
             size_bytes=stored.size_bytes,
             sha256_hex=stored.sha256_hex,
-            processing_status="uploaded",
+            processing_status="processing",
         )
         session.add(contract)
-        session.commit()
+        session.flush()  
+
+        try:
+            clause_types = (
+                session.query(ClauseType)
+                .options(selectinload(ClauseType.patterns))
+                .order_by(ClauseType.id)
+                .all()
+            )
+
+            with storage.open(stored.key) as fh:
+                text = fh.read().decode("utf-8", errors="strict")
+
+            # Build matrix rows: one per clause type
+            rows: list[ContractClause] = []
+            for ct in clause_types:
+                detected = _detect_clause(text, ct.patterns) if ct.patterns else False
+                rows.append(
+                    ContractClause(
+                        contract_id=contract.id,
+                        clause_type_id=ct.id,
+                        detected=detected,
+                        confirmed=None,
+                    )
+                )
+
+            session.add_all(rows)
+
+            contract.processing_status = "processed"
+            contract.processed_at = datetime.now(timezone.utc)
+            contract.error_message = None
+
+            session.commit()
+
+        except Exception as e:
+            session.rollback()
+            session.add(contract)
+            contract.processing_status = "failed"
+            contract.processed_at = datetime.now(timezone.utc)
+            contract.error_message = str(e)[:2000]
+            session.commit()
+            return jsonify({"error": "processing_failed"}), 500
 
         return jsonify({
             "id": contract.id,

@@ -67,3 +67,24 @@ class Contract(TimestampMixin, Base):
 
 
 Index("ix_contracts_sha256_hex", Contract.sha256_hex)
+
+class ContractClause(TimestampMixin, Base):
+    __tablename__ = "contract_clauses"
+    __table_args__ = (
+        UniqueConstraint("contract_id", "clause_type_id", name="uq_contract_clauses_contract_clause"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    contract_id: Mapped[int] = mapped_column(
+        ForeignKey("contracts.id", ondelete="CASCADE"), nullable=False
+    )
+    clause_type_id: Mapped[int] = mapped_column(
+        ForeignKey("clause_types.id", ondelete="CASCADE"), nullable=False
+    )
+
+    detected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confirmed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # user override
+
+Index("ix_contract_clauses_contract_id", ContractClause.contract_id)
+Index("ix_contract_clauses_clause_type_id", ContractClause.clause_type_id)
