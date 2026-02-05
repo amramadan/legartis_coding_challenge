@@ -19,11 +19,15 @@ services:
     build: ./backend
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/legartis
+      CONTRACT_STORAGE_DIR: /data/contracts
+      MAX_UPLOAD_BYTES: "26214400"   # 25MB
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./backend/data/contracts:/data/contracts
 
   frontend:
     build: ./frontend
@@ -34,3 +38,4 @@ services:
 
 volumes:
   pgdata:
+  contractdata:

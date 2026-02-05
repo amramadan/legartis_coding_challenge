@@ -37,3 +37,6 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# mounts
+data/

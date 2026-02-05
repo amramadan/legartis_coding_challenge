@@ -1,8 +1,11 @@
 from flask import Flask, jsonify
 from sqlalchemy import create_engine
 
-from app.api.clause_types import bp as clause_types_bp
+from app.storage_local import LocalFileStorage
 from app.model import Base
+
+from app.api.clause_types import bp as clause_types_bp
+from app.api.contracts import bp as contracts_bp
 
 
 def create_app() -> Flask:
@@ -19,6 +22,12 @@ def create_app() -> Flask:
     engine = create_engine(db_url, pool_pre_ping=True)
     app.extensions["db_engine"] = engine
 
+    max_upload = int(os.getenv("MAX_UPLOAD_BYTES", "26214400"))
+    app.config["MAX_CONTENT_LENGTH"] = max_upload
+
+    storage_dir = os.getenv("CONTRACT_STORAGE_DIR", "./data/contracts")
+    app.extensions["storage"] = LocalFileStorage(storage_dir)
+
     @app.get("/health")
     def health():
         return jsonify({"status": "ok"}), 200
@@ -33,5 +42,6 @@ def create_app() -> Flask:
             return jsonify({"db": "down"}), 503
 
     app.register_blueprint(clause_types_bp, url_prefix="/api/clause-types")
+    app.register_blueprint(contracts_bp, url_prefix="/api/contracts")
 
     return app

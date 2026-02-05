@@ -1,5 +1,6 @@
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import Integer, String, UniqueConstraint, ForeignKey, Boolean, Index
+from sqlalchemy import Integer, String, UniqueConstraint, ForeignKey, Boolean, Index, DateTime, BigInteger, Text
+from datetime import datetime, timezone
 
 
 class Base(DeclarativeBase):
@@ -34,3 +35,24 @@ class ClausePattern(Base):
 
 
 Index("ix_clause_patterns_clause_type_id", ClausePattern.clause_type_id)
+
+class Contract(Base):
+    __tablename__ = "contracts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    storage_backend: Mapped[str] = mapped_column(String(50), nullable=False)  # "local"
+    storage_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256_hex: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    processing_status: Mapped[str] = mapped_column(String(30), nullable=False, default="uploaded")
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc), nullable=False)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now(timezone.utc), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+Index("ix_contracts_sha256_hex", Contract.sha256_hex)
