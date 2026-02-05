@@ -1,13 +1,25 @@
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import Integer, String, UniqueConstraint, ForeignKey, Boolean, Index, DateTime, BigInteger, Text
-from datetime import datetime, timezone
+from sqlalchemy import Integer, String, UniqueConstraint, ForeignKey, Boolean, Index, DateTime, BigInteger, Text, func
+from datetime import datetime
 
 
 class Base(DeclarativeBase):
     pass
 
+class TimestampMixin:
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
-class ClauseType(Base):
+class ClauseType(TimestampMixin, Base):
     __tablename__ = "clause_types"
     __table_args__ = (UniqueConstraint("name", name="uq_clause_types_name"),)
 
@@ -19,7 +31,7 @@ class ClauseType(Base):
         cascade="all, delete-orphan",
     )
 
-class ClausePattern(Base):
+class ClausePattern(TimestampMixin, Base):
     __tablename__ = "clause_patterns"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -36,7 +48,7 @@ class ClausePattern(Base):
 
 Index("ix_clause_patterns_clause_type_id", ClausePattern.clause_type_id)
 
-class Contract(Base):
+class Contract(TimestampMixin, Base):
     __tablename__ = "contracts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -50,8 +62,7 @@ class Contract(Base):
     sha256_hex: Mapped[str] = mapped_column(String(64), nullable=False)
 
     processing_status: Mapped[str] = mapped_column(String(30), nullable=False, default="uploaded")
-    uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(timezone.utc), nullable=False)
-    processed_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.now(timezone.utc), nullable=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
