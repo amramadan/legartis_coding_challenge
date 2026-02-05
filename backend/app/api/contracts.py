@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, jsonify, request
@@ -12,22 +11,11 @@ from sqlalchemy.orm import selectinload
 from app.api._common import db_session, json_error
 from app.model import ClauseType, Contract, ContractClause
 from app.storage_local import LocalFileStorage
+from app.services.scanner import scan_contract_text
 
 bp = Blueprint("contracts", __name__)
 
 ALLOWED_EXTS = {".txt", ".md", ".markdown"}
-
-
-def _detect_clause(contract_text: str, patterns) -> bool:
-    hay_lower = contract_text.lower()
-    for p in patterns:
-        if p.is_regex:
-            if re.search(p.pattern, contract_text, flags=re.IGNORECASE):
-                return True
-        else:
-            if p.pattern.lower() in hay_lower:
-                return True
-    return False
 
 
 def _allowed_filename(name: str) -> bool:
@@ -100,17 +88,17 @@ def upload_contract():
             with storage.open(stored.key) as fh:
                 contract_text = fh.read().decode("utf-8", errors="strict")
 
-            rows: list[ContractClause] = []
-            for ct in clause_types:
-                detected = _detect_clause(contract_text, ct.patterns) if ct.patterns else False
-                rows.append(
-                    ContractClause(
-                        contract_id=contract.id,
-                        clause_type_id=ct.id,
-                        detected=detected,
-                        confirmed=None,
-                    )
+            scan_results = scan_contract_text(contract_text, clause_types)
+
+            rows: list[ContractClause] = [
+                ContractClause(
+                    contract_id=contract.id,
+                    clause_type_id=r.clause_type_id,
+                    detected=r.detected,
+                    confirmed=None,
                 )
+                for r in scan_results
+            ]
 
             session.add_all(rows)
 
