@@ -12,6 +12,8 @@ services:
 
   backend:
     build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/legartis
     ports:
       - "8000:8000"
     depends_on:
