@@ -19,9 +19,6 @@ def create_app() -> Flask:
     engine = create_engine(db_url, pool_pre_ping=True)
     app.extensions["db_engine"] = engine
 
-    # TEMPORARY: create tables automatically (we'll replace with Alembic in a later commit)
-    Base.metadata.create_all(engine)
-
     @app.get("/health")
     def health():
         return jsonify({"status": "ok"}), 200
